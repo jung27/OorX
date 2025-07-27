@@ -1,0 +1,27 @@
+.container {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
+}
+
+.right-border {
+  border-right: 1px solid black;
+}
+
+.bottom-border {
+  border-bottom: 1px solid black;
+}
+
+.painted {
+  background-color: red;
+}
+
+.btn {
+  margin: 5px;
+  padding: 10px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
