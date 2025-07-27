@@ -198,7 +198,7 @@ const judge = () => {
   console.log(`  O Probability: ${output1 * 100}%`);
   console.log(`  X Probability: ${output2 * 100}%`);
 
-  judgement.innerHTML = `This is ${output1 > output2 ? "O" : "X"}`;
+  judgement.innerHTML = `This is ${output1 > output2 ? "'O'" : "'X'"}`;
 };
 
 const maxPooling = (image) => {
