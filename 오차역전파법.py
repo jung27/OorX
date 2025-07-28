@@ -123,6 +123,26 @@ class Variable:
 
     def __gt__(self, other):
         return self.data > (other.data if isinstance(other, Variable) else other)
+    
+    def __lt__(self, other):
+        return self.data < (other.data if isinstance(other, Variable) else other)
+    
+    def sigmoid(self):
+        out = Variable(1 / (1 + math.exp(-self.data)), (self,), 'sigmoid')
+        def _backward():
+            sig = out.data
+            self._grad += sig * (1 - sig) * out._grad
+        out._backward = _backward
+        return out
+    
+    def log(self):
+        if self.data <= 0:
+            raise ValueError("Logarithm undefined for non-positive values")
+        out = Variable(math.log(self.data), (self,), 'log')
+        def _backward():
+            self._grad += (1 / self.data) * out._grad
+        out._backward = _backward
+        return out
 
     def __repr__(self):
         return f"Variable({self.data})"

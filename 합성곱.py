@@ -6,7 +6,7 @@ def sumproduct(image, kernel, pos):
     for i in range(size):
         for j in range(size):
             value = image[pos[1] + i][pos[0] + j] * kernel[i][j]
-            output = output + value
+            output += value
     return output
 
 def convolution(image, kernel, bias=0):
@@ -20,7 +20,7 @@ def convolution(image, kernel, bias=0):
         for x in range(image_width - kernel_size + 1):
             value = sumproduct(image, kernel, (x, y))
             # Apply the sigmoid function
-            sigmoid_value = 1 / (1 + math.e ** (-1 * value + bias))
+            sigmoid_value = (value - bias).sigmoid()
             row.append(sigmoid_value)
         output.append(row)
     
