@@ -1,153 +1,127 @@
-import 합성곱
-from 오차역전파법 import Variable
-import math
+# ===== 학습.py =====
+import math, random
 import numpy as np
-import random
+from 오차역전파법 import Variable
+import 합성곱
 
-# 파일 경로
-images = np.load("images.npy")
-labels = np.load("labels.npy")
-# images = np.load("images_from_excel.npy")
-# labels = np.load("labels_from_excel.npy")
+# —— Hyperparams —— #
+epochs     = 50
+batch_size = 32
+init_lr    = 1e-2
+beta1      = 0.9
+beta2      = 0.999
+eps        = 1e-8
+lr_decay   = 0.95
 
-def max_pooling(matrix, pool_size=2, stride=None):
-    if stride is None:
-        stride = pool_size
+# —— Data —— #
+images = np.load("images.npy")  # (N,9,9)
+labels = np.load("labels.npy")  # 0 or 1
+N,H,W = images.shape
 
-    h = len(matrix)
-    w = len(matrix[0])
-    out_h = (h - pool_size) // stride + 1
-    out_w = (w - pool_size) // stride + 1
+# —— Model Setup —— #
+def xavier(f_in,f_out):
+    lim = math.sqrt(6/(f_in+f_out))
+    return random.uniform(-lim, lim)
 
-    # 출력 행렬 초기화
-    output = [[None] * out_w for _ in range(out_h)]
-
-    for i in range(out_h):
-        for j in range(out_w):
-            # 윈도우 내 모든 값 중 최댓값 선택
-            window_vals = []
-            for di in range(pool_size):
-                for dj in range(pool_size):
-                    window_vals.append(matrix[i*stride + di][j*stride + dj])
-            output[i][j] = max(window_vals)
-    return output
-
-def softmax(a: Variable, b: Variable):
-    e = math.e
-    return (e ** a / (e ** a + e ** b), e ** b / (e ** a + e ** b))
-
-def rand_weight(mean=0.0, std=0.1):
-    return Variable(random.gauss(mean, std))
-
-# 은닉층 3개
-hidden1 = [[rand_weight() for _ in range(4)] for _ in range(4)]
-hidden2 = [[rand_weight() for _ in range(4)] for _ in range(4)]
-hidden3 = [[rand_weight() for _ in range(4)] for _ in range(4)]
-
-# bias (thresholds)
-threshold1 = rand_weight()
-threshold2 = rand_weight()
-threshold3 = rand_weight()
-
-# 출력층 가중치: 3 x 3 크기 필터 * 3개 필터 + bias
-output_weights1 = [
-    [[rand_weight() for _ in range(3)] for _ in range(3)],
-    [[rand_weight() for _ in range(3)] for _ in range(3)],
-    [[rand_weight() for _ in range(3)] for _ in range(3)],
-    rand_weight()
+C = 8  # conv channels
+# Conv kernels + biases
+conv_kernels = [
+    [[Variable(xavier(9,9)) for _ in range(4)] for _ in range(4)]
+    for _ in range(C)
 ]
+conv_biases = [Variable(0.0) for _ in range(C)]
 
-output_weights2 = [
-    [[rand_weight() for _ in range(3)] for _ in range(3)],
-    [[rand_weight() for _ in range(3)] for _ in range(3)],
-    [[rand_weight() for _ in range(3)] for _ in range(3)],
-    rand_weight()
-]
+# After conv(4×4)->relu->pool(2×2): feature map size = 3×3
+feat_h = (H-4+1 - 2)//2 +1
+feat_w = (W-4+1 - 2)//2 +1
+feat_dim = C * feat_h * feat_w
 
-for j in range(10):
-    indices = list(range(len(images)))
+# FC layer
+fc_w = [Variable(xavier(feat_dim,1)) for _ in range(feat_dim)]
+fc_b = Variable(0.0)
+
+# Collect all params
+params = []
+for kern in conv_kernels:
+    for row in kern:
+        params += row
+params += conv_biases
+params += fc_w + [fc_b]
+
+# Adam state
+m = {p:0.0 for p in params}
+v = {p:0.0 for p in params}
+t = 0
+
+# —— Training Loop —— #
+indices = list(range(N))
+lr = init_lr
+
+for ep in range(1, epochs+1):
+    total_loss = 0.0
     random.shuffle(indices)
-    for i in indices:  # 10개 이미지에 대해서만 학습
-        test_image = images[i]
-        first = 합성곱.convolution(test_image, hidden1, threshold1)
-        second = 합성곱.convolution(test_image, hidden2, threshold2)
-        third = 합성곱.convolution(test_image, hidden3, threshold3)
 
-        max_pool1 = max_pooling(first, pool_size=2, stride=None)
-        max_pool2 = max_pooling(second, pool_size=2, stride=None)
-        max_pool3 = max_pooling(third, pool_size=2, stride=None)
+    for b in range(0, N, batch_size):
+        batch_idx = indices[b:b+batch_size]
+        # accumulate batch loss
+        batch_loss = Variable(0.0)
 
-        result1 = (합성곱.sumproduct(max_pool1, output_weights1[0], (0, 0)) + \
-                합성곱.sumproduct(max_pool2, output_weights1[1], (0, 0)) + \
-                합성곱.sumproduct(max_pool3, output_weights1[2], (0, 0)) + (-1 * output_weights1[3])).sigmoid()
+        for i in batch_idx:
+            # 1) to Variable image
+            img = [[Variable(px) for px in row] for row in images[i]]
 
-        result2 = (합성곱.sumproduct(max_pool1, output_weights2[0], (0, 0)) + \
-                합성곱.sumproduct(max_pool2, output_weights2[1], (0, 0)) + \
-                합성곱.sumproduct(max_pool3, output_weights2[2], (0, 0)) + (-1 * output_weights2[3])).sigmoid()
+            # 2) conv→relu→pool→flatten
+            feats = []
+            for kern, cb in zip(conv_kernels, conv_biases):
+                fm = 합성곱.convolution(img, kern, cb)
+                fm = [[v.relu() for v in row] for row in fm]
+                pm = 합성곱.max_pooling(fm,2)
+                for row in pm: feats.extend(row)
 
-        output1, output2 = softmax(result1, result2)
+            # 3) FC(logit)→sigmoid
+            logit = Variable(0.0)
+            for w,x in zip(fc_w, feats):
+                logit = logit + w * x
+            logit = logit + fc_b
+            pred  = logit.sigmoid()
 
-        label = [0, 0]
-        label[labels[i]] = 1
+            # 4) BCE loss
+            yv   = Variable(float(labels[i]))
+            loss = -( yv*pred.log()
+                    + (1.0-yv)*(1.0-pred).log() )
+            batch_loss = batch_loss + loss
+            total_loss += loss.data
 
-        loss = -label[0] * output1.log() - label[1] * output2.log()
+        # 5) backward & Adam update
+        batch_loss = batch_loss / len(batch_idx)
+        batch_loss.backward()
+        t += 1
 
-        print(f"Image {i+1}:")
-        # print(f"  O일 확률: {output1.data*100:.2f}%")
-        # print(f"  X일 확률: {output2.data*100:.2f}%")
-        print(f"  정답: {labels[i]}")
-        print(f"  오차: {loss.data}")
-        loss.backward()
-        #경사하강법
-        learning_rate = 0.01
+        for p in params:
+            g = p.grad
+            m[p] = beta1*m[p] + (1-beta1)*g
+            v[p] = beta2*v[p] + (1-beta2)*(g*g)
+            m_hat = m[p] / (1 - beta1**t)
+            v_hat = v[p] / (1 - beta2**t)
+            p.data -= lr * m_hat / (math.sqrt(v_hat) + eps)
 
-        for h in hidden1:
-            for v in h:
-                v.data -= learning_rate * v.grad
-                v.zero_grad()
-        for h in hidden2:
-            for v in h:
-                v.data -= learning_rate * v.grad
-                v.zero_grad()
-        for h in hidden3:
-            for v in h:
-                v.data -= learning_rate * v.grad
-                v.zero_grad()
+        batch_loss.zero_grad()
 
-        threshold1.data -= learning_rate * threshold1.grad
-        threshold2.data -= learning_rate * threshold2.grad
-        threshold3.data -= learning_rate * threshold3.grad
-        threshold1.zero_grad()
-        threshold2.zero_grad()
-        threshold3.zero_grad()
+    lr *= lr_decay
+    print(f"Epoch {ep:2d}/{epochs} — avg loss: {total_loss/N:.4f}")
 
-        for w in output_weights1:
-            if isinstance(w, Variable):
-                w.data -= learning_rate * w.grad
-                w.zero_grad()
-                continue
-            for v in w:
-                for c in v:
-                    if isinstance(c, Variable):
-                        c.data -= learning_rate * c.grad
-                        c.zero_grad()
-        for w in output_weights2:
-            if isinstance(w, Variable):
-                w.data -= learning_rate * w.grad
-                w.zero_grad()
-                continue
-            for v in w:
-                for c in v:
-                    if isinstance(c, Variable):
-                        c.data -= learning_rate * c.grad
-                        c.zero_grad()
+# Save model params
+# Variable 객체에서 실제 수치만 추출
+model = {
+    "conv_kernels": [
+        [ [v.data for v in row] for row in kern ]
+        for kern in conv_kernels
+    ],
+    "conv_biases": [ b.data for b in conv_biases ],
+    "fc_w":         [ w.data for w in fc_w ],
+    "fc_b":         fc_b.data
+}
 
-
-print(f"  Hidden1: {hidden1}")
-print(f"  Hidden2: {hidden2}")
-print(f"  Hidden3: {hidden3}")
-print(f"  Threshold1: {threshold1}")
-print(f"  Threshold2: {threshold2}")
-print(f"  Threshold3: {threshold3}")
-print(f"  Output Weights1: {output_weights1}")
-print(f"  Output Weights2: {output_weights2}")
+# numpy 파일로 저장 (pickle 기반)
+np.save("model.npy", model)
+print("📦 모델 파라미터를 model.npy에 저장했습니다.")
